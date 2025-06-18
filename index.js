@@ -34,14 +34,14 @@ const httpServer = createServer(app);
 
 app.use(cookieParser());
 app.use(cors({
-  origin: 'http://localhost:3000',
+  origin: ['http://localhost:3000','https://chat-app-bb.vercel.app'],
   methods: ['GET', 'POST', 'DELETE', 'PUT'], 
   credentials: true, 
 }));
 
 const io = new Server(httpServer, {
   cors: {
-    origin: 'http://localhost:3000',
+    origin: ['http://localhost:3000','https://chat-app-bb.vercel.app'],
     methods: ['GET', 'POST'],
   }
 });
