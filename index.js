@@ -49,23 +49,21 @@ const io = new Server(httpServer, {
 // Socket logic
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
-
+  handleOnline(socket);
 
   socket.on('get_profile', (data) => getProfile(socket, data));
   socket.on('add_contact', (data) => handleAddContact(socket, data));
   socket.on('get_contacts', () => handleGetContacts(socket));
   socket.on('go_online', () => handleOnline(socket));
   socket.on('go_offline', () => handleOffline(socket));
-  socket.on('join_all_rooms', (data) => handleJoinAllRooms(socket)); 
-
+  socket.on('join_all_rooms', () => handleJoinAllRooms(socket)); 
   socket.on('join_room', (data) => joinRoom(socket, data));
   socket.on('send_message', (data) => handlemessageSend(socket, data));
-socket.on('typing_started', (data) => handleTypingStarted(socket, data));
+  socket.on('typing_started', (data) => handleTypingStarted(socket, data));
   socket.on('typing_stopped', (data) => handleTypingStopped(socket, data));
-
   socket.on('get_messages', (data) => handlegetMessages(socket, data));
-
   socket.on('disconnect', () => {
+    handleOffline(socket);
     console.log('Socket disconnected:', socket.id);
   });
 });

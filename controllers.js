@@ -192,32 +192,12 @@ export async function getProfile(socket) {
     return socket.emit('getProfile_error', { error: 'Something went wrong' });
   }
 }
-export async function handleupdateProfile(socket, data) {
+export async function handleupdateProfile(socket) {
   try {
-    await connectDB();
 
     const { user: currentUser, error } = await authenticateSocketUser(socket);
     if (error) return socket.emit('updateProfile_error', { error });
-
-    const { name, email, avatarUrl } = data;
-    if (!name || !email) {
-      return socket.emit('updateProfile_error', { error: 'Name and email are required' });
-    }
-
-    const updatedUser = await User.findByIdAndUpdate(
-      currentUser._id,
-      { name, email, avatarUrl },
-      { new: true, runValidators: true }
-    ).select('-password -__v');
-
-    if (!updatedUser) {
-      return socket.emit('updateProfile_error', { error: 'User not found' });
-    }
-
-    
     const contacts = await Contact.find({ user: currentUser._id }).select('contactUser');
-
-  
     for (const contact of contacts) {
       const contactId = contact.contactUser.toString();
       const ids = [currentUser._id.toString(), contactId].sort();
