@@ -1,16 +1,12 @@
+// main Socket.IO server file (e.g., index.js or server.js)
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config(); // Ensure .env variables are loaded
 
 import express from 'express';
 import { createServer } from 'http'; 
 import { Server } from 'socket.io';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-// import { parse } from 'cookie';
-// import jwt from 'jsonwebtoken';
-// import User from './models/User.js';
-// import { Contact } from './models/Contact.js';
-// import { Message } from './models/Message.js';
 
 import {
   handleGetContacts,
@@ -24,10 +20,9 @@ import {
   handleTypingStarted,
   handleTypingStopped,
   handleJoinAllRooms,
-  // handleUploadImage, 
-} from './controllers.js';
+} from './controllers.js'; // Assuming your controllers are in a separate file
 
-import { connectDB } from './mongodb.js'; 
+import { connectDB } from './mongodb.js'; // Assuming your DB connection is in a separate file
 
 const app = express();
 const httpServer = createServer(app);
@@ -43,8 +38,14 @@ const io = new Server(httpServer, {
   cors: {
     origin: ['http://localhost:3000','https://chat-app-bb.vercel.app'],
     methods: ['GET', 'POST'],
-    credentials: true
+    credentials: true // ✅ REQUIRED for Socket.IO CORS to allow cookies - ALREADY CORRECT
   }
+});
+
+// Debug middleware for Socket.IO - Keep this! It's crucial for debugging
+io.use((socket, next) => {
+  console.log('Socket Cookie Header:', socket.handshake.headers.cookie);
+  next();
 });
 
 // Socket logic
@@ -69,8 +70,7 @@ io.on('connection', (socket) => {
   });
 });
 
-
-connectDB();
+connectDB(); // Ensure database connection
 const PORT = process.env.SOCKET_PORT || 4000;
 httpServer.listen(PORT, () => {
   console.log(`Socket server running at http://localhost:${PORT}`);
