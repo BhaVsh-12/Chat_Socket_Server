@@ -1,21 +1,40 @@
+// controllers.js
 import jwt from 'jsonwebtoken';
 import { connectDB } from "./mongodb.js";
 import User from './models/User.js';
-import { Contact } from './models/Contact.js';
-import { parse } from 'cookie'; // 👈 install with: npm install cookie
-import dotenv from 'dotenv';
-dotenv.config({ path: '.env.local' });
-import { authenticateSocketUser } from './utils/socketAuth.js';
-import { v2 as cloudinary } from 'cloudinary';
-import { Message } from './models/Message.js';
-import { time } from 'console';
-import mongoose from 'mongoose';
+import { Contact } from './models/Contact.js'; // Assuming Contact model is correctly imported/defined
+import { Message } from './models/Message.js'; // Assuming Message model is correctly imported/defined
+import mongoose from 'mongoose'; // For isValidObjectId
+
+
+// No longer needed to import parse or dotenv here if JWT_SECRET is loaded globally
+// import { parse } from 'cookie'; 
+// import dotenv from 'dotenv';
+// dotenv.config({ path: '.env.local' }); 
+
+// ✅ CHANGE: authenticateSocketUser is now called ONCE in main server.js
+// and the user is attached to socket.user.
+// So, we just need to use socket.user directly here.
+// The authenticateSocketUser function provided in this file is the OLD version, 
+// so ensure you are using the new one from `utils/socketAuth.js` which accepts the token directly.
+// The `authenticateSocketUser` function is no longer called within these handlers.
+
+// Helper function to check if user is authenticated (using socket.user)
+function isAuthenticated(socket) {
+  if (!socket.user) {
+    console.error('Socket: User not authenticated for this operation.');
+    return { authenticated: false, error: 'Unauthorized: User not authenticated' };
+  }
+  return { authenticated: true, user: socket.user };
+}
+
 export async function handleAddContact(socket, data) {
   try {
     await connectDB();
 
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('add_contact_error', { error });
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('add_contact_error', { error });
 
     const { email } = data;
     if (!email) {
@@ -25,6 +44,11 @@ export async function handleAddContact(socket, data) {
     const contactUser = await User.findOne({ email });
     if (!contactUser) {
       return socket.emit('add_contact_error', { error: 'Contact user not found' });
+    }
+
+    // Prevent adding self as contact
+    if (currentUser._id.toString() === contactUser._id.toString()) {
+      return socket.emit('add_contact_error', { error: 'Cannot add yourself as a contact' });
     }
 
     const existingContact = await Contact.findOne({
@@ -45,22 +69,20 @@ export async function handleAddContact(socket, data) {
       unread: 0,
       lastMessage: '',
       time: new Date().toISOString(),
-      status: 'offline',
+      status: 'offline', // Default, will be updated by handleOnline/Offline
     });
 
- 
     const contactToCurrent = await Contact.create({
       user: contactUser._id,
       contactUser: currentUser._id,
       unread: 0,
       lastMessage: '',
       time: new Date().toISOString(),
-      status: 'offline',
+      status: 'offline', // Default
     });
 
     currentUser.contacts.push(currentToContact._id);
     contactUser.contacts.push(contactToCurrent._id);
-
 
     await Promise.all([currentUser.save(), contactUser.save()]);
 
@@ -69,23 +91,26 @@ export async function handleAddContact(socket, data) {
       contact: currentToContact,
     });
   } catch (err) {
-    console.error(err);
+    console.error('[ADD_CONTACT_ERROR]', err);
     return socket.emit('add_contact_error', { error: 'Something went wrong' });
   }
 }
+
 export async function handleGetContacts(socket) {
   try {
     await connectDB();
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('get_contacts_error', { error });
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('get_contacts_error', { error });
 
     const populatedUser = await User.findById(currentUser._id)
       .populate({
         path: 'contacts',
-        model: Contact,
+        model: 'Contact', // Use string name if Contact model is not directly imported in this scope
         populate: {
           path: 'contactUser',
-          select: 'name email avatarUrl status',
+          model: 'User', // Use string name for User model
+          select: 'name email avatar status', // Changed avatarUrl to avatar (consistent with previous user object)
         },
         select: '-__v',
         options: { sort: { time: -1 } }, // optional sorting
@@ -105,19 +130,21 @@ export async function handleGetContacts(socket) {
     return socket.emit('get_contacts_error', { error: 'Something went wrong' });
   }
 }
+
 export async function handleOnline(socket) {
   try {
     await connectDB();
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('handleOnline_error', { error });
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('handleOnline_error', { error });
 
-    
+    // Update contacts where current user is the contactUser
     await Contact.updateMany(
       { contactUser: currentUser._id },
       { status: 'online' }
     );
 
-  
+    // Get contacts where current user is the "user"
     const contacts = await Contact.find({ user: currentUser._id }).select('contactUser');
 
     for (const contact of contacts) {
@@ -125,8 +152,9 @@ export async function handleOnline(socket) {
       const ids = [currentUser._id.toString(), contactId].sort();
       const room = `${ids[0]}-${ids[1]}`;
 
+      // Emit status update to the other user's room
       socket.to(room).emit('contact_status_update', {
-        contactId: currentUser._id,
+        contactId: currentUser._id, // This is the user who just came online
         status: 'online',
       });
     }
@@ -139,11 +167,13 @@ export async function handleOnline(socket) {
     return socket.emit('handleOnline_error', { error: 'Something went wrong' });
   }
 }
+
 export async function handleOffline(socket) {
   try {
     await connectDB();
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('handleOffline_error', { error });
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('handleOffline_error', { error });
 
     await Contact.updateMany(
       { contactUser: currentUser._id },
@@ -158,7 +188,7 @@ export async function handleOffline(socket) {
       const room = `${ids[0]}-${ids[1]}`;
       
       socket.to(room).emit('contact_status_update', {
-        contactId: currentUser._id,
+        contactId: currentUser._id, // This is the user who just went offline
         status: 'offline',
       });
     }
@@ -171,12 +201,15 @@ export async function handleOffline(socket) {
     return socket.emit('handleOffline_error', { error: 'Something went wrong' });
   }
 }
-export async function getProfile(socket) {
+
+export async function getProfile(socket) { // ✅ No data parameter needed
   try{
     await connectDB();
 
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('getProfile_error', { error });
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('getProfile_error', { error });
+
     const user = await User.findById(currentUser._id).select('-password -__v');
     if (!user) {
       return socket.emit('getProfile_error', { error: 'User not found' });
@@ -192,28 +225,50 @@ export async function getProfile(socket) {
     return socket.emit('getProfile_error', { error: 'Something went wrong' });
   }
 }
-export async function handleupdateProfile(socket) {
-  try {
 
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('updateProfile_error', { error });
+// ✅ NEW: Added 'data' parameter to handleupdateProfile, as it would usually receive update data
+export async function handleupdateProfile(socket, data) { 
+  try {
+    await connectDB(); // Ensure DB connection for update
+
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('updateProfile_error', { error });
+
+    const { name, email, avatarUrl } = data; // Assuming data contains fields to update
+
+    if (!name && !email && !avatarUrl) {
+      return socket.emit('updateProfile_error', { error: 'No data provided for update' });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      currentUser._id,
+      { name, email, avatar: avatarUrl }, // Assuming 'avatar' field in User model is 'avatarUrl' here
+      { new: true, runValidators: true }
+    ).select('-password -__v');
+
+    if (!updatedUser) {
+      return socket.emit('updateProfile_error', { error: 'User not found for update' });
+    }
+
+    // Update status in contacts if user changed their own status or profile
     const contacts = await Contact.find({ user: currentUser._id }).select('contactUser');
     for (const contact of contacts) {
       const contactId = contact.contactUser.toString();
       const ids = [currentUser._id.toString(), contactId].sort();
       const room = `${ids[0]}-${ids[1]}`;
 
+      // Emit update to other users in shared rooms
       socket.to(room).emit('contact_profile_updated', {
-        contactId: updatedUser._id,
+        contactId: updatedUser._id, // The user whose profile was updated
         updatedData: {
           name: updatedUser.name,
           email: updatedUser.email,
-          avatarUrl: updatedUser.avatarUrl,
+          avatar: updatedUser.avatar, // Use updatedUser.avatar here
         },
       });
     }
 
-    
     socket.emit('updateProfile_success', {
       message: 'Profile updated successfully',
       user: updatedUser,
@@ -226,19 +281,21 @@ export async function handleupdateProfile(socket) {
     });
   }
 }
+
 export async function joinRoom(socket, data) {
   try {
     await connectDB();
 
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('join_room_error', { error });
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('join_room_error', { error });
 
     const { contactid } = data;
     if (!contactid || !mongoose.Types.ObjectId.isValid(contactid)) {
       return socket.emit('join_room_error', { error: 'Valid Contact ID is required' });
     }
 
-    
+    // Validate if the current user has this contact
     const isValidContact = await Contact.findOne({
       user: currentUser._id,
       contactUser: contactid,
@@ -250,7 +307,7 @@ export async function joinRoom(socket, data) {
       });
     }
 
-    
+    // Reset unread count for the current user's side of the conversation
     await Contact.findOneAndUpdate(
       { user:currentUser._id , contactUser: contactid },
       { unread: 0 },
@@ -259,9 +316,9 @@ export async function joinRoom(socket, data) {
 
     const ids = [currentUser._id.toString(), contactid.toString()].sort();
     const room = `${ids[0]}-${ids[1]}`;
-    socket.join(room);
+    socket.join(room); // Join the room
 
-    
+    // Emit to client that unread count has been reset
     socket.emit('unread_reset', { contactId: contactid });
 
     return socket.emit('join_room_success', {
@@ -273,18 +330,25 @@ export async function joinRoom(socket, data) {
     return socket.emit('join_room_error', { error: 'Something went wrong' });
   }
 }
+
 export async function handlemessageSend(socket, data) {
   try {
     await connectDB();
 
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('message_error', { error });
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('message_error', { error });
 
     const { senderId, receiverId, text } = data;
     if (!senderId || !receiverId || !text) {
       return socket.emit('message_error', {
         error: 'Missing senderId, receiverId, or text',
       });
+    }
+
+    // Ensure the senderId matches the authenticated user's ID
+    if (currentUser._id.toString() !== senderId.toString()) {
+      return socket.emit('message_error', { error: 'Unauthorized: Sender ID mismatch' });
     }
 
     const ids = [senderId.toString(), receiverId.toString()].sort();
@@ -299,21 +363,21 @@ export async function handlemessageSend(socket, data) {
       status: 'sent',
     });
 
-    
+    // Emit message to everyone in the room except the sender
     socket.to(room).emit('message_received', {
       message,
       room,
     });
 
-
+    // Emit confirmation to the sender
     socket.emit('message_sent', {
       message,
       room,
     });
 
-    
+    // Update unread count and last message for the receiver's contact entry
     await Contact.findOneAndUpdate(
-      { user: receiverId, contactUser: senderId },
+      { user: receiverId, contactUser: senderId }, // Find the receiver's entry for the current sender
       {
         $inc: { unread: 1 },
         lastMessage: text,
@@ -322,22 +386,36 @@ export async function handlemessageSend(socket, data) {
       { new: true }
     );
 
-    return;
+    return; // No explicit success emit needed here, message_sent/received handles it
   } catch (err) {
     console.error('[MESSAGE_SEND_ERROR]', err);
     return socket.emit('message_error', { error: 'Something went wrong' });
   }
 }
+
 export async function handlegetMessages(socket, data) {
   try {
     await connectDB();
 
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('message_error', { error });
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('message_error', { error });
 
     const { contactId } = data;
-    if (!contactId) {
-      return socket.emit('message_error', { error: 'Contact ID is required' });
+    if (!contactId || !mongoose.Types.ObjectId.isValid(contactId)) {
+      return socket.emit('message_error', { error: 'Valid Contact ID is required' });
+    }
+
+    // Verify contact exists for the current user
+    const isValidContact = await Contact.findOne({
+      user: currentUser._id,
+      contactUser: contactId,
+    });
+
+    if (!isValidContact) {
+      return socket.emit('message_error', {
+        error: 'You are not allowed to view messages with this user.',
+      });
     }
 
     const ids = [contactId.toString(), currentUser._id.toString()].sort();
@@ -351,11 +429,13 @@ export async function handlegetMessages(socket, data) {
     return socket.emit('message_error', { error: 'Something went wrong' });
   }
 }
+
 export async function handleJoinAllRooms(socket) {
   try {
     await connectDB();
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('join_all_rooms_error', { error });
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('join_all_rooms_error', { error });
 
     const contacts = await Contact.find({ user: currentUser._id }).select('contactUser');
     
@@ -363,6 +443,7 @@ export async function handleJoinAllRooms(socket) {
       const ids = [currentUser._id.toString(), contact.contactUser.toString()].sort();
       const room = `${ids[0]}-${ids[1]}`;
       socket.join(room);
+      console.log(`User ${currentUser._id} joined room ${room}`); // Debugging
     }
 
     socket.emit('join_all_rooms_success', { message: 'All rooms joined successfully' });
@@ -371,10 +452,12 @@ export async function handleJoinAllRooms(socket) {
     socket.emit('join_all_rooms_error', { error: 'Something went wrong' });
   }
 }
+
 export async function handleTypingStarted(socket, data) {
   try {
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('typing_error', { error: 'Authentication failed' });
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('typing_error', { error: 'Authentication failed' });
 
     const { senderId, receiverId } = data;
     if (!senderId || !receiverId) {
@@ -389,7 +472,7 @@ export async function handleTypingStarted(socket, data) {
     const ids = [senderId.toString(), receiverId.toString()].sort();
     const room = `${ids[0]}-${ids[1]}`;
 
-    
+    // Emit to everyone in the room except the sender
     socket.to(room).emit('typing_started', { senderId }); 
     console.log(`User ${senderId} started typing in room ${room}`);
 
@@ -398,10 +481,12 @@ export async function handleTypingStarted(socket, data) {
     socket.emit('typing_error', { error: 'Failed to broadcast typing status' });
   }
 }
+
 export async function handleTypingStopped(socket, data) {
   try {
-    const { user: currentUser, error } = await authenticateSocketUser(socket);
-    if (error) return socket.emit('typing_error', { error: 'Authentication failed' });
+    // ✅ CHANGE: Get user from socket.user
+    const { authenticated, user: currentUser, error } = isAuthenticated(socket);
+    if (!authenticated) return socket.emit('typing_error', { error: 'Authentication failed' });
 
     const { senderId, receiverId } = data;
     if (!senderId || !receiverId) {
@@ -424,7 +509,3 @@ export async function handleTypingStopped(socket, data) {
     socket.emit('typing_error', { error: 'Failed to broadcast typing status' });
   }
 }
-
-
-
-
