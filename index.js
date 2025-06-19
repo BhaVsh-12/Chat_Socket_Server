@@ -1,4 +1,4 @@
-// main Socket.IO server file (e.g., index.js or server.js)
+
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -6,7 +6,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
-// import cookieParser from 'cookie-parser'; // ✅ CHANGE: Remove cookieParser
+
 
 import {
   handleGetContacts,
@@ -20,37 +20,30 @@ import {
   handleTypingStarted,
   handleTypingStopped,
   handleJoinAllRooms,
-  handleupdateProfile // ✅ Add handleupdateProfile import
-} from './controllers.js'; // Assuming your controllers are in a separate file
+  handleupdateProfile 
+} from './controllers.js'; 
 import { authenticateSocketUser } from './utils/socketAuth.js'; // Ensure this import
 
-import { connectDB } from './mongodb.js'; // Assuming your DB connection is in a separate file
-
+import { connectDB } from './mongodb.js'; 
 const app = express();
 const httpServer = createServer(app);
 
-// ✅ CHANGE: Remove app.use(cookieParser());
-// app.use(cookieParser()); 
 
 app.use(cors({
   origin: ['http://localhost:3000','https://chat-app-bb.vercel.app'], // Your frontend origins
   methods: ['GET', 'POST', 'DELETE', 'PUT'], 
-  credentials: true, // Keep if other API calls from frontend to this backend require credentials
+  credentials: true, 
 }));
 
 const io = new Server(httpServer, {
   cors: {
     origin: ['http://localhost:3000','https://chat-app-bb.vercel.app'], // Your frontend origins
     methods: ['GET', 'POST'],
-    credentials: true // Keep if other API calls from frontend to this backend require credentials
+    credentials: true 
   }
 });
 
-// ✅ CHANGE: Remove the cookie header logging middleware
-// io.use((socket, next) => {
-//   console.log('Socket Cookie Header:', socket.handshake.headers.cookie);
-//   next();
-// });
+
 
 // Socket logic
 io.on('connection', async (socket) => { // Make async to await authentication
@@ -73,14 +66,11 @@ io.on('connection', async (socket) => { // Make async to await authentication
     socket.disconnect(true);
     return;
   }
-  
-  // Attach user to socket for later use in controllers
+ 
   socket.user = user; 
   console.log(`Socket ${socket.id} authenticated for user: ${user.email}`);
-
-  // Your existing socket event handlers - now they can directly use socket.user
   handleOnline(socket);
-  socket.on('get_profile', () => getProfile(socket)); // ✅ No data parameter needed for getProfile now
+  socket.on('get_profile', () => getProfile(socket)); 
   socket.on('add_contact', (data) => handleAddContact(socket, data));
   socket.on('get_contacts', () => handleGetContacts(socket));
   socket.on('go_online', () => handleOnline(socket));
@@ -91,7 +81,7 @@ io.on('connection', async (socket) => { // Make async to await authentication
   socket.on('typing_started', (data) => handleTypingStarted(socket, data));
   socket.on('typing_stopped', (data) => handleTypingStopped(socket, data));
   socket.on('get_messages', (data) => handlegetMessages(socket, data));
-  socket.on('update_profile', (data) => handleupdateProfile(socket, data)); // ✅ Add this handler
+  socket.on('update_profile', (data) => handleupdateProfile(socket, data)); 
   socket.on('disconnect', () => {
     handleOffline(socket);
     console.log('Socket disconnected:', socket.id);
