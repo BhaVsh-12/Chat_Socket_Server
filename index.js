@@ -43,6 +43,7 @@ const io = new Server(httpServer, {
   cors: {
     origin: ['http://localhost:3000','https://chat-app-bb.vercel.app'],
     methods: ['GET', 'POST'],
+    credentials: true
   }
 });
 
