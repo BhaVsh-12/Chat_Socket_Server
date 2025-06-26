@@ -27,6 +27,13 @@ const UserSchema = new Schema(
         ref: 'Contact',
       },
     ],
+    groups: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: 'Group',
+      },
+    ],
+
   },
   { timestamps: true }
 );

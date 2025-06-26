@@ -22,6 +22,7 @@ const ContactSchema = new Schema(
     lastMessage: { type: String },
     time: { type: String },
     unread: { type: Number, default: 0 },
+    inroom:{type:Boolean,default:false},
   },
   { timestamps: true }
 );

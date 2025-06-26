@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
 export async function authenticateSocketUser(token) {
+  
   try {
     if (!token) {
       console.error('authenticateSocketUser: Unauthorized - Token missing');
